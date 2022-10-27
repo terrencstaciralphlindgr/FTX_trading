@@ -7,6 +7,7 @@ import datetime
 import numpy as np
 from time import process_time_ns
 import math
+import window
 # from client import FtxClient
 # from local_settings import ftx as settings
 
@@ -63,56 +64,33 @@ BTC_open_n = (BTC_open - np.min(BTC_open)) / (np.max(BTC_open) - np.min(BTC_open
 ETH_open_n = np.delete(ETH_open_n, omit)
 BTC_open_n = np.delete(BTC_open_n, omit)
 
-# Get
-stationary = BTC_open_n / ETH_open_n
-omit = []
-[omit.append(idx) for idx, x in enumerate(stationary) if x == 0 or math.isinf(x)]
-stationary = np.delete(stationary, omit)
+last24hr_ETH = window.Window(ETH_open_n)
+last24hr_BTC = window.Window(BTC_open_n)
 
-mean = np.mean(stationary)
-print(mean)
+# Get ratio
+# stationary = BTC_open_n / ETH_open_n
+# omit = []
+# [omit.append(idx) for idx, x in enumerate(stationary) if x == 0 or math.isinf(x)]
 
+# last24Ratio = window.Window(np.delete(stationary, omit))
 
-last30_ETH = ETH_open[-30:]
-last30_BTC = BTC_open[-30:]
+# mean = np.mean(last24Ratio.arr)
 
-
-
-print('Run time in ns:', process_time_ns() - start_time)
-exit()
-
-ETH_ask = (ETH_ask - ETH_ask.min()) / (ETH_ask.max() - ETH_ask.min())
-BTC_ask = (BTC_ask - BTC_ask.min()) / (BTC_ask.max() - BTC_ask.min())
-
-TH_ask = (ETH_ask - ETH_ask.min()) / (ETH_ask.max() - ETH_ask.min())
-BTC_ask = (BTC_ask - BTC_ask.min()) / (BTC_ask.max() - BTC_ask.min())
-
-print(process_time_ns() - t)
-
-exit()
-# Normalize
-min_ = pd.Series(ETH_open/BTC_open).min()
-max_ = pd.Series(ETH_open/BTC_open).max()
-mean_ = pd.Series(ETH_open/BTC_open).mean()
-
-
-ETH_open = (ETH_open - ETH_open.min()) / (ETH_open.max() - ETH_open.min())
-BTC_open = (BTC_open - BTC_open.min()) / (BTC_open.max() - BTC_open.min())
-
-print(df)
-
-urlBTC = api_url + path
-
-market_name = 'ETH/USD'
-path = f'/markets/{market_name}/orderbook?depth=1'
-urlETH = api_url + path
-
-
-interval = 1
+last30m_ETH = window.Window(ETH_open[-30:])
+last30m_BTC = window.Window(BTC_open[-30:])
 
 
 
-def pullFromMarket():
+print('Start up run time in ns:', process_time_ns() - start_time)
+
+interval = 5  # Run every 5 seconds (can and should change)
+short_BTC_long_ETH = long_BTC_short_ETH = False
+
+def makeOrders(bid: float, bid_size: float, ask: float, ask_size: float) -> None:
+    pass
+    # use ftx api here
+
+def pullFromMarket() -> None:
     res = requests.get(urlBTC).json()
     df = pd.DataFrame(res)['result']
     BTC_bid = df['bids'][0][0]
@@ -125,12 +103,53 @@ def pullFromMarket():
     ETH_ask = df['asks'][0][0]
     mid_ETH = (ETH_ask + ETH_bid) / 2
 
+    # Normalize the data
+    # TO DO
+
+    # Update windows
+    last24hr_ETH.update(mid_ETH)
+    last24hr_BTC.update(mid_BTC)
+    last30m_ETH.update(mid_ETH)
+    last30m_BTC.update(mid_BTC)
+
+    # Get mean
+    stationary = last24hr_BTC.arr / last24hr_ETH
+    omit = []
+    [omit.append(idx) for idx, x in enumerate(stationary) if x == 0 or math.isinf(x)]
+    mean = np.mean(np.delete(stationary, omit))
+
+    last30ratio = last30m_BTC / last30m_ETH
+    omit = []
+    [omit.append(idx) for idx, x in enumerate(last30ratio) if x == 0 or math.isinf(x)]
+    std = np.std(np.delete(last30ratio, omit))
+
+
+    # MAKE TRADES
+    # TO DO, CALC CURR RATIO ACCORDING TO OTHER THINGS ABOVE, IMPLEMENT FUNCTION THAT SENDS IN ORDERS
+    if short_BTC_long_ETH:
+        if curr_ratio < mean + std * 0.5:
+            # CLOSE POSITION
+            short_BTC_long_ETH = False
+            pass
+    elif long_BTC_short_ETH:
+        if curr_ratio > mean - std * 0.5:
+            # CLOSE POSITION
+            long_BTC_short_ETH = False
+            pass
+    else:
+        if curr_ratio > mean + std:
+            # short BTC long ETH
+            short_BTC_long_ETH = False
+            pass
+        elif curr_ratio < mean - std:
+            # long BTC short ETH
+            long_BTC_short_ETH = True
+            pass
 
 
 
-
-def startTrading():
+def startTrading() -> None:
     threading.Timer(interval, startTrading).start()
     pullFromMarket()
 
-# startTrading()
+startTrading()
